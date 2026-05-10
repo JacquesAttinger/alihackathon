@@ -90,11 +90,20 @@ async def get_route(req: RouteRequest):
     except nx.NetworkXNoPath:
         raise HTTPException(400, "No walkable route found between these points")
 
-    coords = [[G.nodes[n]["x"], G.nodes[n]["y"]] for n in path]
-    total_length = sum(
-        min(G[u][v][k].get("length", 50) for k in G[u][v])
-        for u, v in zip(path[:-1], path[1:])
-    )
+    # Filter out any nodes with non-finite coordinates (rare OSM data issues)
+    coords = [
+        [G.nodes[n]["x"], G.nodes[n]["y"]]
+        for n in path
+        if math.isfinite(G.nodes[n]["x"]) and math.isfinite(G.nodes[n]["y"])
+    ]
+
+    total_length = 0.0
+    for u, v in zip(path[:-1], path[1:]):
+        length = min(G[u][v][k].get("length", 50) for k in G[u][v])
+        if math.isfinite(length):
+            total_length += length
+        else:
+            total_length += 50  # fallback for bad edges
     walking_minutes = round(total_length / 80)
 
     return {
