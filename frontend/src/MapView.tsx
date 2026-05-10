@@ -321,10 +321,16 @@ export default function MapView({ module, onBack }: Props) {
             </div>
             <div className="walk-time">{result.walking_minutes} min walk</div>
             <div className="breakdown">
-              <div className="breakdown-item"><span className="bi-icon">💡</span><span>{result.breakdown.lighting}</span></div>
-              <div className="breakdown-item"><span className="bi-icon">🔒</span><span>{result.breakdown.crime}</span></div>
-              <div className="breakdown-item"><span className="bi-icon">🏪</span><span>{result.breakdown.businesses}</span></div>
-              <div className="breakdown-item"><span className="bi-icon">⚠️</span><span>{result.breakdown.dead_zones}</span></div>
+              <div className="breakdown-item">
+                <span className="bi-icon">🌿</span>
+                <span>
+                  {result.overall_score >= 75
+                    ? 'Highly scenic — parks, trees, or lakefront'
+                    : result.overall_score >= 40
+                    ? 'Some green space along the route'
+                    : 'Limited greenery on this route'}
+                </span>
+              </div>
             </div>
           </div>
         )}
