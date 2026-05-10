@@ -1,22 +1,14 @@
 """
-Loads Chicago park locations and finds the best park waypoint for a route.
+Loads Chicago park locations from OpenStreetMap and finds the best
+park waypoint for a given route.
 
-Best park = the one that minimises the detour:
+Best park = minimises detour:
     detour = haversine(start, park) + haversine(park, end) - haversine(start, end)
-
-We use straight-line distance for the selection (fast, O(n_parks)),
-then do the actual graph routing through the chosen park node.
 """
 
 import math
-import requests
-import networkx as nx
 import osmnx as ox
-
-PARKS_URL = (
-    "https://data.cityofchicago.org/resource/ej32-qgdr.json"
-    "?$limit=1000&$select=park,location"
-)
+import networkx as nx
 
 
 def _haversine(lat1, lng1, lat2, lng2) -> float:
@@ -29,22 +21,22 @@ def _haversine(lat1, lng1, lat2, lng2) -> float:
 
 
 def load_parks() -> list[dict]:
-    """Returns list of {name, lat, lng} for all Chicago parks."""
-    print("  Loading Chicago parks…")
+    """Fetch Chicago parks from OSM. Returns list of {name, lat, lng}."""
+    print("  Loading Chicago parks from OpenStreetMap…")
     try:
-        rows = requests.get(PARKS_URL, timeout=30).json()
+        gdf = ox.features_from_place(
+            "Chicago, Illinois, USA",
+            tags={"leisure": "park"},
+        )
         parks = []
-        for r in rows:
+        for _, row in gdf.iterrows():
             try:
-                coords = r["location"]["coordinates"]  # [lng, lat]
-                parks.append({
-                    "name": r.get("park", "Park"),
-                    "lat": float(coords[1]),
-                    "lng": float(coords[0]),
-                })
-            except (KeyError, TypeError, IndexError, ValueError):
+                centroid = row.geometry.centroid
+                name = row.get("name", "Park") or "Park"
+                parks.append({"name": name, "lat": centroid.y, "lng": centroid.x})
+            except Exception:
                 continue
-        print(f"    {len(parks)} parks loaded")
+        print(f"    {len(parks)} parks loaded from OSM")
         return parks
     except Exception as e:
         print(f"    Parks load failed: {e}")
@@ -65,7 +57,6 @@ def best_park_node(
         return None, None
 
     direct = _haversine(start_lat, start_lng, end_lat, end_lng)
-
     best_node, best_name, best_detour = None, None, float("inf")
 
     for park in parks:
@@ -75,10 +66,11 @@ def best_park_node(
             - direct
         )
         if detour < best_detour:
-            best_detour = detour
-            best_name = park["name"]
             try:
-                best_node = ox.distance.nearest_nodes(G, park["lng"], park["lat"])
+                node = ox.distance.nearest_nodes(G, park["lng"], park["lat"])
+                best_detour = detour
+                best_node = node
+                best_name = park["name"]
             except Exception:
                 continue
 
