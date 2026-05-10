@@ -7,32 +7,55 @@ mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-type Suggestion = { place_name: string; center: [number, number] }
+type Coord = [number, number] // [lng, lat]
+type Suggestion = { place_name: string; center: Coord }
 type SafetyBreakdown = { lighting: string; crime: string; businesses: string; dead_zones: string }
-type RouteResult = { safety_score: number; walking_minutes: number; breakdown: SafetyBreakdown; route: { geometry: { coordinates: [number, number][] } } }
+type RouteResult = {
+  safety_score: number
+  walking_minutes: number
+  breakdown: SafetyBreakdown
+  route: { geometry: { coordinates: Coord[] } }
+}
+
+// ── Geocoding ────────────────────────────────────────────────────────────────
 
 async function geocode(query: string): Promise<Suggestion[]> {
   const token = import.meta.env.VITE_MAPBOX_TOKEN
   const res = await fetch(
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&country=us&proximity=-87.6298,41.8781&types=address,poi`
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json` +
+    `?access_token=${token}&country=us&proximity=-87.6298,41.8781&types=address,poi`
   )
   const data = await res.json()
-  return data.features?.map((f: { place_name: string; center: [number, number] }) => ({
+  return data.features?.map((f: { place_name: string; center: Coord }) => ({
     place_name: f.place_name,
     center: f.center,
   })) ?? []
 }
+
+async function reverseGeocode(coord: Coord): Promise<string> {
+  const token = import.meta.env.VITE_MAPBOX_TOKEN
+  const res = await fetch(
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${coord[0]},${coord[1]}.json` +
+    `?access_token=${token}&types=address,poi&limit=1`
+  )
+  const data = await res.json()
+  return data.features?.[0]?.place_name ?? `${coord[1].toFixed(5)}, ${coord[0].toFixed(5)}`
+}
+
+// ── Address input with autocomplete ─────────────────────────────────────────
 
 function AddressInput({
   label,
   value,
   onChange,
   onSelect,
+  color,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   onSelect: (s: Suggestion) => void
+  color: string
 }) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [open, setOpen] = useState(false)
@@ -51,12 +74,15 @@ function AddressInput({
 
   return (
     <div className="input-wrapper">
-      <label>{label}</label>
+      <div className="input-label-row">
+        <span className="pin-dot" style={{ background: color }} />
+        <label>{label}</label>
+      </div>
       <input
         value={value}
         onChange={e => handleChange(e.target.value)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={`Enter ${label.toLowerCase()}`}
+        placeholder={`Search or click map to place pin`}
       />
       {open && (
         <ul className="suggestions">
@@ -71,45 +97,105 @@ function AddressInput({
   )
 }
 
+// ── Main App ─────────────────────────────────────────────────────────────────
+
+type PinMode = 'start' | 'end' | null
+
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const startMarker = useRef<mapboxgl.Marker | null>(null)
   const endMarker = useRef<mapboxgl.Marker | null>(null)
+  const pinMode = useRef<PinMode>(null)
 
   const [startText, setStartText] = useState('')
   const [endText, setEndText] = useState('')
-  const [startCoord, setStartCoord] = useState<[number, number] | null>(null)
-  const [endCoord, setEndCoord] = useState<[number, number] | null>(null)
+  const [startCoord, setStartCoord] = useState<Coord | null>(null)
+  const [endCoord, setEndCoord] = useState<Coord | null>(null)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<RouteResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [clickHint, setClickHint] = useState<string | null>(null)
+
+  // Place / update a marker and reverse-geocode its label
+  const setPin = useCallback(async (coord: Coord, type: 'start' | 'end') => {
+    if (!map.current) return
+    const isStart = type === 'start'
+    const color = isStart ? '#22c55e' : '#ef4444'
+    const markerRef = isStart ? startMarker : endMarker
+
+    if (markerRef.current) {
+      markerRef.current.setLngLat(coord)
+    } else {
+      markerRef.current = new mapboxgl.Marker({ color, draggable: true })
+        .setLngLat(coord)
+        .addTo(map.current)
+
+      markerRef.current.on('dragend', async () => {
+        const lngLat = markerRef.current!.getLngLat()
+        const newCoord: Coord = [lngLat.lng, lngLat.lat]
+        if (isStart) {
+          setStartCoord(newCoord)
+          setStartText(await reverseGeocode(newCoord))
+        } else {
+          setEndCoord(newCoord)
+          setEndText(await reverseGeocode(newCoord))
+        }
+        setResult(null)
+      })
+    }
+
+    if (isStart) {
+      setStartCoord(coord)
+      setStartText(await reverseGeocode(coord))
+    } else {
+      setEndCoord(coord)
+      setEndText(await reverseGeocode(coord))
+    }
+    setResult(null)
+  }, [])
+
+  // Map click: place start first, then end, then alternate
+  const handleMapClick = useCallback((e: mapboxgl.MapMouseEvent) => {
+    const coord: Coord = [e.lngLat.lng, e.lngLat.lat]
+
+    if (pinMode.current) {
+      // Explicit mode set by button
+      setPin(coord, pinMode.current)
+      pinMode.current = null
+      setClickHint(null)
+    } else if (!startMarker.current) {
+      setPin(coord, 'start')
+      setClickHint('Now click to place your destination pin')
+    } else if (!endMarker.current) {
+      setPin(coord, 'end')
+      setClickHint(null)
+    } else {
+      // Both placed — move whichever is closer
+      const startLL = startMarker.current!.getLngLat()
+      const endLL = endMarker.current!.getLngLat()
+      const dStart = Math.hypot(coord[0] - startLL.lng, coord[1] - startLL.lat)
+      const dEnd = Math.hypot(coord[0] - endLL.lng, coord[1] - endLL.lat)
+      setPin(coord, dStart < dEnd ? 'start' : 'end')
+    }
+  }, [setPin])
 
   useEffect(() => {
     if (map.current) return
-    map.current = new mapboxgl.Map({
+    const m = new mapboxgl.Map({
       container: mapContainer.current!,
       style: 'mapbox://styles/mapbox/dark-v11',
       center: [-87.6298, 41.8781],
       zoom: 13,
     })
-    map.current.addControl(new mapboxgl.NavigationControl(), 'bottom-right')
-  }, [])
+    m.addControl(new mapboxgl.NavigationControl(), 'bottom-right')
+    m.on('click', handleMapClick)
+    // Change cursor to crosshair over map so it's clear it's clickable
+    m.getCanvas().style.cursor = 'crosshair'
+    map.current = m
+  }, [handleMapClick])
 
-  const placeMarker = useCallback((coord: [number, number], type: 'start' | 'end') => {
-    if (!map.current) return
-    const color = type === 'start' ? '#22c55e' : '#ef4444'
-    if (type === 'start') {
-      startMarker.current?.remove()
-      startMarker.current = new mapboxgl.Marker({ color }).setLngLat(coord).addTo(map.current)
-    } else {
-      endMarker.current?.remove()
-      endMarker.current = new mapboxgl.Marker({ color }).setLngLat(coord).addTo(map.current)
-    }
-    map.current.flyTo({ center: coord, zoom: 14 })
-  }, [])
-
-  const drawRoute = useCallback((coords: [number, number][]) => {
+  const drawRoute = useCallback((coords: Coord[]) => {
     if (!map.current) return
     const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
       type: 'Feature',
@@ -144,7 +230,7 @@ export default function App() {
   }, [])
 
   const findRoute = async () => {
-    if (!startCoord || !endCoord) { setError('Please select both a start and destination.'); return }
+    if (!startCoord || !endCoord) { setError('Place both pins on the map first.'); return }
     setLoading(true)
     setError(null)
     setResult(null)
@@ -168,6 +254,16 @@ export default function App() {
     }
   }
 
+  const handleSearchSelect = useCallback((type: 'start' | 'end') => (s: Suggestion) => {
+    setPin(s.center, type)
+    map.current?.flyTo({ center: s.center, zoom: 15 })
+  }, [setPin])
+
+  const activatePinMode = (type: PinMode) => {
+    pinMode.current = type
+    setClickHint(`Click anywhere on the map to place the ${type} pin`)
+  }
+
   const scoreColor = (score: number) =>
     score >= 75 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444'
 
@@ -175,24 +271,43 @@ export default function App() {
     <div className="app">
       <div ref={mapContainer} className="map" />
 
+      {clickHint && <div className="click-hint">{clickHint}</div>}
+
       <div className="panel">
         <div className="panel-header">
           <h1>SafeWalk</h1>
           <p>Chicago's safest walking routes</p>
         </div>
 
-        <AddressInput
-          label="Start"
-          value={startText}
-          onChange={setStartText}
-          onSelect={s => { setStartCoord(s.center); placeMarker(s.center, 'start') }}
-        />
-        <AddressInput
-          label="Destination"
-          value={endText}
-          onChange={setEndText}
-          onSelect={s => { setEndCoord(s.center); placeMarker(s.center, 'end') }}
-        />
+        <div className="pin-instructions">
+          Click the map to place pins, or search below. Drag pins to adjust.
+        </div>
+
+        <div className="input-group">
+          <AddressInput
+            label="Start"
+            value={startText}
+            onChange={setStartText}
+            onSelect={handleSearchSelect('start')}
+            color="#22c55e"
+          />
+          <button className="pin-btn" onClick={() => activatePinMode('start')}>
+            Drop Pin
+          </button>
+        </div>
+
+        <div className="input-group">
+          <AddressInput
+            label="Destination"
+            value={endText}
+            onChange={setEndText}
+            onSelect={handleSearchSelect('end')}
+            color="#ef4444"
+          />
+          <button className="pin-btn" onClick={() => activatePinMode('end')}>
+            Drop Pin
+          </button>
+        </div>
 
         <button
           className="route-btn"
