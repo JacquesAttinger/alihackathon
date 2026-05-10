@@ -27,8 +27,56 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .panel-header h1 { font-size: 22px; font-weight: 700; color: #22c55e; letter-spacing: -0.5px; }
 .panel-header p  { font-size: 12px; color: #666; margin-top: 2px; }
 
+/* ── Click hint toast ── */
+.click-hint {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(17,17,17,0.9);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 20px;
+  padding: 10px 20px;
+  font-size: 13px;
+  color: #ccc;
+  z-index: 20;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Pin instructions ── */
+.pin-instructions {
+  font-size: 12px;
+  color: #555;
+  line-height: 1.4;
+  padding: 6px 0 2px;
+}
+
+/* ── Input + Drop Pin row ── */
+.input-group { display: flex; align-items: flex-end; gap: 8px; }
+.input-group .input-wrapper { flex: 1; }
+
+.pin-btn {
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: #aaa;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s;
+  margin-bottom: 0;
+}
+.pin-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
 /* ── Inputs ── */
 .input-wrapper { position: relative; display: flex; flex-direction: column; gap: 5px; }
+
+.input-label-row { display: flex; align-items: center; gap: 6px; }
+.pin-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 .input-wrapper label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
 
