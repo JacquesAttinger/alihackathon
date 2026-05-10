@@ -12,9 +12,10 @@ type Coord = [number, number]
 type Suggestion = { place_name: string; center: Coord }
 type SafetyBreakdown = { lighting: string; crime: string; businesses: string; dead_zones: string }
 type RouteResult = {
-  safety_score: number
+  overall_score: number
   walking_minutes: number
   breakdown: SafetyBreakdown
+  param_scores: Record<string, number>
   route: { geometry: { coordinates: Coord[] } }
 }
 
@@ -313,9 +314,9 @@ export default function MapView({ module, onBack }: Props) {
         {result && (
           <div className="result">
             <div className="score-row">
-              <span className="score-label">Safety Score</span>
-              <span className="score-value" style={{ color: scoreColor(result.safety_score) }}>
-                {result.safety_score}/100
+              <span className="score-label">Scenic Score</span>
+              <span className="score-value" style={{ color: scoreColor(result.overall_score) }}>
+                {result.overall_score}/100
               </span>
             </div>
             <div className="walk-time">{result.walking_minutes} min walk</div>

@@ -1,4 +1,5 @@
 import os
+import pickle
 import networkx as nx
 import osmnx as ox
 from fastapi import FastAPI, HTTPException
@@ -14,30 +15,41 @@ app = FastAPI(title="SafeWalk API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173"],
-    allow_methods=["POST", "GET"],
+    allow_origins=["*"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 G: nx.MultiDiGraph | None = None
 _modules: dict[str, Module] = {}
 
-# Default module: maximize scenic quality at full weight
 SCENIC_WEIGHTS = {"scenic_quality": 1.0}
+GRAPH_CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache", "chicago_scenic.pkl")
 
 
 @app.on_event("startup")
 async def startup():
     global G
-    print("Loading Chicago street graph…")
+    if os.path.exists(GRAPH_CACHE_PATH):
+        print("Loading graph from cache…")
+        with open(GRAPH_CACHE_PATH, "rb") as f:
+            G = pickle.load(f)
+        print("Ready.")
+        return
+
+    print("Loading Chicago street graph (first run — will be cached after this)…")
     G = ox.graph_from_place("Chicago, Illinois, USA", network_type="walk", retain_all=False)
     G = ox.add_edge_speeds(G)
     G = ox.add_edge_travel_times(G)
 
     print("Loading scenic_quality parameter…")
     ScenicQuality().load(G)
-
     apply_weights(G, SCENIC_WEIGHTS)
+
+    os.makedirs(os.path.dirname(GRAPH_CACHE_PATH), exist_ok=True)
+    print("Saving graph to cache…")
+    with open(GRAPH_CACHE_PATH, "wb") as f:
+        pickle.dump(G, f)
     print("Ready.")
 
 
