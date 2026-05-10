@@ -9,17 +9,13 @@
 
 ---
 
-## 1. Google Places API — already have key, needs enabling
+## 1. Google Places API — ✅ Already working
 
 **What it unlocks:** restaurant density, nightlife density, coffee shops, open businesses (4 parameters)
 
-**Status:** Key is saved in `.env`. You need to make sure these APIs are enabled in Google Cloud Console:
-- Go to `console.cloud.google.com`
-- Search and enable: **Places API (New)** or **Places API**
+**Status:** Tested and confirmed working. The Places API (New) is enabled on your account and the key is saved in `.env`. No action needed.
 
-That's it — the code will pick up the key automatically.
-
-**Cost estimate:** The loader samples the city in a grid. At ~500 grid cells × 4 place types = ~2,000 API calls at startup. Google's free tier covers 1,000 calls/month; this will likely cost ~$3–5 per server restart. For a hackathon: acceptable. For production: add caching to disk.
+**Cost estimate:** The loader samples the city in a grid. At ~500 grid cells × 4 place types = ~2,000 API calls at startup. This will likely cost ~$3–5 per server restart. For a hackathon: acceptable. For production: add caching to disk.
 
 ---
 
@@ -70,8 +66,8 @@ That's it — the code will pick up the key automatically.
 | lakefront_access | ✅ Working | None |
 | All Tier 3 OSM params (9 params) | ✅ Working | None |
 | All Tier 4 composites (9 params) | ✅ Working | (depends on above) |
-| restaurant_density | ⚠️ Needs Places API enabled | Enable in Google Cloud Console |
-| nightlife_density | ⚠️ Needs Places API enabled | Enable in Google Cloud Console |
-| coffee_shop_density | ⚠️ Needs Places API enabled | Enable in Google Cloud Console |
-| open_businesses | ⚠️ Needs Places API enabled | Enable in Google Cloud Console |
+| restaurant_density | ✅ Working | None |
+| nightlife_density | ✅ Working | None |
+| coffee_shop_density | ✅ Working | None |
+| open_businesses | ✅ Working | None |
 | foot_traffic | ⚠️ Optional Foursquare key | Create free Foursquare account |
