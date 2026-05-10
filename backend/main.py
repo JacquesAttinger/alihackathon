@@ -1,5 +1,6 @@
 import os
 import pickle
+import math
 import networkx as nx
 import osmnx as ox
 from fastapi import FastAPI, HTTPException
@@ -7,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from parameters import PARAMETER_REGISTRY, Module, ScenicQuality, apply_weights, score_route
+from parks import load_parks, best_park_node
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -21,15 +22,16 @@ app.add_middleware(
 )
 
 G: nx.MultiDiGraph | None = None
-_modules: dict[str, Module] = {}
-
-SCENIC_WEIGHTS = {"scenic_quality": 1.0}
-GRAPH_CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache", "chicago_scenic.pkl")
+PARKS: list[dict] = []
+GRAPH_CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache", "chicago_graph.pkl")
 
 
 @app.on_event("startup")
 async def startup():
-    global G
+    global G, PARKS
+
+    PARKS = load_parks()
+
     if os.path.exists(GRAPH_CACHE_PATH):
         print("Loading graph from cache…")
         with open(GRAPH_CACHE_PATH, "rb") as f:
@@ -41,10 +43,6 @@ async def startup():
     G = ox.graph_from_place("Chicago, Illinois, USA", network_type="walk", retain_all=False)
     G = ox.add_edge_speeds(G)
     G = ox.add_edge_travel_times(G)
-
-    print("Loading scenic_quality parameter…")
-    ScenicQuality().load(G)
-    apply_weights(G, SCENIC_WEIGHTS)
 
     os.makedirs(os.path.dirname(GRAPH_CACHE_PATH), exist_ok=True)
     print("Saving graph to cache…")
@@ -60,8 +58,6 @@ class RouteRequest(BaseModel):
     start_lng: float
     end_lat: float
     end_lng: float
-    module_id: str | None = None
-    weights: dict[str, float] | None = None
 
 
 @app.post("/api/route")
@@ -69,28 +65,37 @@ async def get_route(req: RouteRequest):
     if G is None:
         raise HTTPException(503, "Graph not loaded yet — retry in a moment")
 
-    if req.weights:
-        weights = req.weights
-    elif req.module_id and req.module_id in _modules:
-        weights = _modules[req.module_id].weights
-    else:
-        weights = SCENIC_WEIGHTS
-
-    apply_weights(G, weights)
-
     try:
         start_node = ox.distance.nearest_nodes(G, req.start_lng, req.start_lat)
         end_node   = ox.distance.nearest_nodes(G, req.end_lng,   req.end_lat)
     except Exception as e:
         raise HTTPException(400, f"Could not find nearest nodes: {e}")
 
+    # Find the park that adds the least detour
+    park_node, park_name = best_park_node(
+        G, PARKS,
+        req.start_lat, req.start_lng,
+        req.end_lat,   req.end_lng,
+    )
+
     try:
-        path = nx.shortest_path(G, start_node, end_node, weight="module_cost")
+        if park_node and park_node != start_node and park_node != end_node:
+            leg1 = nx.shortest_path(G, start_node, park_node, weight="length")
+            leg2 = nx.shortest_path(G, park_node,  end_node,  weight="length")
+            # Avoid duplicating the park node at the join
+            path = leg1 + leg2[1:]
+        else:
+            park_name = None
+            path = nx.shortest_path(G, start_node, end_node, weight="length")
     except nx.NetworkXNoPath:
         raise HTTPException(400, "No walkable route found between these points")
 
-    coords  = [[G.nodes[n]["x"], G.nodes[n]["y"]] for n in path]
-    metrics = score_route(G, path, weights)
+    coords = [[G.nodes[n]["x"], G.nodes[n]["y"]] for n in path]
+    total_length = sum(
+        min(G[u][v][k].get("length", 50) for k in G[u][v])
+        for u, v in zip(path[:-1], path[1:])
+    )
+    walking_minutes = round(total_length / 80)
 
     return {
         "route": {
@@ -98,59 +103,11 @@ async def get_route(req: RouteRequest):
             "geometry": {"type": "LineString", "coordinates": coords},
             "properties": {},
         },
-        **metrics,
+        "park_name": park_name,
+        "walking_minutes": walking_minutes,
     }
-
-
-# ── Modules ───────────────────────────────────────────────────────────────────
-
-class ModuleCreate(BaseModel):
-    name: str
-    prompt: str
-    weights: dict[str, float]
-
-
-@app.post("/api/modules")
-async def create_module(body: ModuleCreate):
-    invalid = [k for k in body.weights if k not in PARAMETER_REGISTRY]
-    if invalid:
-        raise HTTPException(400, f"Unknown parameter keys: {invalid}")
-    module = Module(name=body.name, prompt=body.prompt, weights=body.weights)
-    _modules[module.id] = module
-    return module.to_dict()
-
-
-@app.get("/api/modules")
-async def list_modules():
-    return [m.to_dict() for m in _modules.values()]
-
-
-@app.get("/api/modules/{module_id}")
-async def get_module(module_id: str):
-    if module_id not in _modules:
-        raise HTTPException(404, "Module not found")
-    return _modules[module_id].to_dict()
-
-
-@app.delete("/api/modules/{module_id}")
-async def delete_module(module_id: str):
-    if module_id not in _modules:
-        raise HTTPException(404, "Module not found")
-    del _modules[module_id]
-    return {"deleted": module_id}
-
-
-# ── Parameter registry (for UI/LLM) ──────────────────────────────────────────
-
-@app.get("/api/parameters")
-async def get_parameters():
-    return [
-        {"key": p.key, "name": p.name, "description": p.description,
-         "category": p.category, "direction": p.direction}
-        for p in PARAMETER_REGISTRY.values()
-    ]
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "graph_loaded": G is not None}
+    return {"status": "ok", "graph_loaded": G is not None, "parks_loaded": len(PARKS)}

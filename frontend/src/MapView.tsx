@@ -10,12 +10,9 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 type Coord = [number, number]
 type Suggestion = { place_name: string; center: Coord }
-type SafetyBreakdown = { lighting: string; crime: string; businesses: string; dead_zones: string }
 type RouteResult = {
-  overall_score: number
+  park_name: string | null
   walking_minutes: number
-  breakdown: SafetyBreakdown
-  param_scores: Record<string, number>
   route: { geometry: { coordinates: Coord[] } }
 }
 
@@ -252,9 +249,6 @@ export default function MapView({ module, onBack }: Props) {
     setClickHint(`Click anywhere on the map to place the ${type} pin`)
   }
 
-  const scoreColor = (score: number) =>
-    score >= 75 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444'
-
   return (
     <div className="app">
       <div ref={mapContainer} className="map" />
@@ -313,25 +307,15 @@ export default function MapView({ module, onBack }: Props) {
 
         {result && (
           <div className="result">
-            <div className="score-row">
-              <span className="score-label">Scenic Score</span>
-              <span className="score-value" style={{ color: scoreColor(result.overall_score) }}>
-                {result.overall_score}/100
-              </span>
-            </div>
             <div className="walk-time">{result.walking_minutes} min walk</div>
-            <div className="breakdown">
-              <div className="breakdown-item">
-                <span className="bi-icon">🌿</span>
-                <span>
-                  {result.overall_score >= 75
-                    ? 'Highly scenic — parks, trees, or lakefront'
-                    : result.overall_score >= 40
-                    ? 'Some green space along the route'
-                    : 'Limited greenery on this route'}
-                </span>
+            {result.park_name && (
+              <div className="breakdown">
+                <div className="breakdown-item">
+                  <span className="bi-icon">🌳</span>
+                  <span>Routed through <strong>{result.park_name}</strong></span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
