@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+osmnx
+networkx
+requests
+python-dotenv
+shapely
+scikit-learn
